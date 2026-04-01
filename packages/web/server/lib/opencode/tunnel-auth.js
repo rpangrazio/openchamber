@@ -512,7 +512,7 @@ export const createTunnelAuth = () => {
       return { ok: false, reason: 'invalid-token' };
     }
 
-    bootstrapRecord.usedAt = nowTs();
+    bootstrapRecord = null;
     clearConnectRateLimit(req);
 
     const sessionId = crypto.randomBytes(32).toString('base64url');
