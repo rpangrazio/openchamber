@@ -63,5 +63,19 @@ COPY --from=builder /app/packages/web/server ./packages/web/server
 COPY --from=builder /app/packages/web/dist ./packages/web/dist
 
 EXPOSE 3000
+USER root
+RUN apt-get update && apt-get install -y curl build-essential gh && \
+    curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel LTS --install-dir /usr/local/share/dotnet && \
+    echo 'export DOTNET_ROOT=/usr/local/share/dotnet' >> /etc/bash.bashrc && \
+    echo 'export PATH=$PATH:$DOTNET_ROOT:$DOTNET_ROOT/tools' >> /etc/bash.bashrc && \
+    echo "export DOTNET_NUGET_GLOBAL_PACKAGES=/home/openchamber/.nuget" >>/etc/bash.bashrc && \
+    echo "#!/bin/bash" > /start.sh && \
+    echo '/home/openchamber/openchamber-entrypoint.sh&' >> /start.sh && \
+    echo "cloudflared tunnel run --token eyJhIjoiMTkxYzkzYWU3OTZmZDkwNGU2ZGQ4Y2FjM2Q3MjI1OTgiLCJ0IjoiNmY1ZDQ2N2YtYzQ3NC00ZGE3LWFmNTktZTNmOGNkNjMyMGZhIiwicyI6IlpEazFNVGRtTnpNdE9HUmpaUzAwTTJRMExXSmlOV1l0WkRFNE4yUXdObUl5TnpZeiJ9" >> /start.sh &&\
+    chmod a+x /start.sh && \
+    apt-get clean  && \
+    rm -rf /var/lib/apt/lists/*
+USER openchamber
+#ENTRYPOINT [ "/start.sh" ]
 
 ENTRYPOINT ["sh", "/home/openchamber/openchamber-entrypoint.sh"]
