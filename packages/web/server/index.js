@@ -80,9 +80,6 @@ const MODELS_METADATA_CACHE_TTL = 5 * 60 * 1000;
 const CLIENT_RELOAD_DELAY_MS = 800;
 const OPEN_CODE_READY_GRACE_MS = 12000;
 const LONG_REQUEST_TIMEOUT_MS = 4 * 60 * 1000;
-const TUNNEL_SESSION_TTL_DEFAULT_MS = 8 * 60 * 60 * 1000;
-const TUNNEL_SESSION_TTL_MIN_MS = 5 * 60 * 1000;
-const TUNNEL_SESSION_TTL_MAX_MS = 24 * 60 * 60 * 1000;
 const OPENCHAMBER_VERSION = (() => {
   try {
     const packagePath = path.resolve(__dirname, '..', 'package.json');
@@ -101,15 +98,11 @@ const settingsNormalizationRuntime = createSettingsNormalizationRuntime({
   os,
   path,
   processLike: process,
-  tunnelSessionTtlDefaultMs: TUNNEL_SESSION_TTL_DEFAULT_MS,
-  tunnelSessionTtlMinMs: TUNNEL_SESSION_TTL_MIN_MS,
-  tunnelSessionTtlMaxMs: TUNNEL_SESSION_TTL_MAX_MS,
 });
 
 const normalizeDirectoryPath = (...args) => settingsNormalizationRuntime.normalizeDirectoryPath(...args);
 const normalizePathForPersistence = (...args) => settingsNormalizationRuntime.normalizePathForPersistence(...args);
 const normalizeSettingsPaths = (...args) => settingsNormalizationRuntime.normalizeSettingsPaths(...args);
-const normalizeTunnelSessionTtlMs = (...args) => settingsNormalizationRuntime.normalizeTunnelSessionTtlMs(...args);
 const normalizeManagedRemoteTunnelHostname = (...args) =>
   settingsNormalizationRuntime.normalizeManagedRemoteTunnelHostname(...args);
 const normalizeManagedRemoteTunnelPresets = (...args) =>
@@ -186,7 +179,6 @@ const resolveManagedRemoteTunnelToken = (...args) => managedTunnelConfigRuntime.
 const settingsHelpers = createSettingsHelpers({
   normalizePathForPersistence,
   normalizeDirectoryPath,
-  normalizeTunnelSessionTtlMs,
   normalizeTunnelProvider,
   normalizeTunnelMode,
   normalizeOptionalPath,
@@ -634,7 +626,6 @@ const tunnelWiringRuntime = createTunnelWiringRuntime({
   normalizeTunnelMode,
   normalizeOptionalPath,
   normalizeManagedRemoteTunnelHostname,
-  normalizeTunnelSessionTtlMs,
   isSupportedTunnelMode,
   upsertManagedRemoteTunnelToken,
   resolveManagedRemoteTunnelToken,
@@ -843,9 +834,7 @@ async function main(options = {}) {
       bunBinaryResolved: resolvedBunBinary || null,
     }),
     uiPassword,
-    tunnelAuthController,
     readSettingsFromDiskMigrated,
-    normalizeTunnelSessionTtlMs,
     resolveZenModel,
     sayTTSCapability,
     ensurePushInitialized,

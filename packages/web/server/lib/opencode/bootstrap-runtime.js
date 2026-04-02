@@ -19,9 +19,7 @@ export const createBootstrapRuntime = (dependencies) => {
       gracefulShutdown,
       getHealthSnapshot,
       uiPassword,
-      tunnelAuthController,
       readSettingsFromDiskMigrated,
-      normalizeTunnelSessionTtlMs,
       resolveZenModel,
       sayTTSCapability,
       ensurePushInitialized,
@@ -63,10 +61,7 @@ export const createBootstrapRuntime = (dependencies) => {
     }
 
     registerAuthAndAccessRoutes(app, {
-      tunnelAuthController,
       uiAuthController,
-      readSettingsFromDiskMigrated,
-      normalizeTunnelSessionTtlMs,
     });
 
     registerTtsRoutes(app, { resolveZenModel, sayTTSCapability });

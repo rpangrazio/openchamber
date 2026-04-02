@@ -35,21 +35,10 @@ export const registerServerStatusRoutes = (app, dependencies) => {
 
 export const registerAuthAndAccessRoutes = (app, dependencies) => {
   const {
-    tunnelAuthController,
     uiAuthController,
   } = dependencies;
 
   app.get('/auth/session', async (req, res) => {
-    const requestScope = tunnelAuthController.classifyRequestScope(req);
-    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
-      const tunnelSession = tunnelAuthController.getTunnelSessionFromRequest(req);
-      if (tunnelSession) {
-        return res.json({ authenticated: true, scope: 'tunnel' });
-      }
-      tunnelAuthController.clearTunnelSessionCookie(req, res);
-      return res.status(401).json({ authenticated: false, locked: true, tunnelLocked: true });
-    }
-
     try {
       await uiAuthController.handleSessionStatus(req, res);
     } catch {
@@ -58,19 +47,11 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   });
 
   app.post('/auth/session', (req, res) => {
-    const requestScope = tunnelAuthController.classifyRequestScope(req);
-    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
-      return res.status(403).json({ error: 'Password login is disabled for tunnel scope', tunnelLocked: true });
-    }
     return uiAuthController.handleSessionCreate(req, res);
   });
 
   app.use('/api', async (req, res, next) => {
     try {
-      const requestScope = tunnelAuthController.classifyRequestScope(req);
-      if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
-        return tunnelAuthController.requireTunnelSession(req, res, next);
-      }
       await uiAuthController.requireAuth(req, res, next);
     } catch (err) {
       next(err);

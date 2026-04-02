@@ -3,9 +3,6 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     os,
     path,
     processLike,
-    tunnelSessionTtlDefaultMs,
-    tunnelSessionTtlMinMs,
-    tunnelSessionTtlMaxMs,
   } = dependencies;
 
   const normalizeDirectoryPath = (value) => {
@@ -225,13 +222,6 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
 
   const clampNumber = (value, min, max) => Math.max(min, Math.min(max, value));
 
-  const normalizeTunnelSessionTtlMs = (value) => {
-    if (!Number.isFinite(value)) {
-      return tunnelSessionTtlDefaultMs;
-    }
-    return clampNumber(Math.round(value), tunnelSessionTtlMinMs, tunnelSessionTtlMaxMs);
-  };
-
   const normalizeManagedRemoteTunnelHostname = (value) => {
     if (typeof value !== 'string') {
       return undefined;
@@ -400,7 +390,6 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     normalizeDirectoryPath,
     normalizePathForPersistence,
     normalizeSettingsPaths,
-    normalizeTunnelSessionTtlMs,
     normalizeManagedRemoteTunnelHostname,
     normalizeManagedRemoteTunnelPresets,
     normalizeManagedRemoteTunnelPresetTokens,

@@ -11,7 +11,6 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     normalizeTunnelMode,
     normalizeOptionalPath,
     normalizeManagedRemoteTunnelHostname,
-    normalizeTunnelSessionTtlMs,
     isSupportedTunnelMode,
     upsertManagedRemoteTunnelToken,
     resolveManagedRemoteTunnelToken,
@@ -333,8 +332,6 @@ export const createTunnelRoutesRuntime = (dependencies) => {
         }));
         const hasStoredManagedRemoteToken = typeof settings?.managedRemoteTunnelToken === 'string' && settings.managedRemoteTunnelToken.trim().length > 0;
         const hasManagedRemoteTunnelToken = getRuntimeManagedRemoteTunnelToken().length > 0 || managedRemoteTunnelConfig.tunnels.length > 0 || hasStoredManagedRemoteToken;
-        const sessionTtlMs = normalizeTunnelSessionTtlMs(settings?.tunnelSessionTtlMs);
-        const activeSessions = tunnelAuthController.listTunnelSessions();
         const activeProvider = tunnelService.resolveActiveProvider();
         const provider = activeProvider || normalizeTunnelProvider(settings?.tunnelProvider);
 
@@ -350,13 +347,8 @@ export const createTunnelRoutesRuntime = (dependencies) => {
             managedRemoteTunnelHostname: managedRemoteHostname || null,
             managedRemoteTunnelPresets: managedRemoteTunnelPresetSummaries,
             managedRemoteTunnelTokenPresetIds: managedRemoteTunnelConfig.tunnels.map((entry) => entry.id),
-            policy: 'tunnel-gated',
             activeTunnelMode: tunnelAuthController.getActiveTunnelMode() || null,
-            activeSessions,
             localPort: getActivePort(),
-            ttlConfig: {
-              sessionTtlMs,
-            },
           });
         }
 
@@ -390,13 +382,8 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           managedRemoteTunnelHostname: managedRemoteHostname || null,
           managedRemoteTunnelPresets: managedRemoteTunnelPresetSummaries,
           managedRemoteTunnelTokenPresetIds: managedRemoteTunnelConfig.tunnels.map((entry) => entry.id),
-          policy: 'tunnel-gated',
           activeTunnelMode: activeNormalizedMode,
-          activeSessions: tunnelAuthController.listTunnelSessions(),
           localPort: getActivePort(),
-          ttlConfig: {
-            sessionTtlMs,
-          },
         });
       } catch (error) {
         return res.status(500).json({ error: 'Failed to get tunnel status' });
@@ -470,11 +457,6 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           || ((runtimeHostname && hostname && runtimeHostname === hostname) ? runtimeToken : '')
           || configManagedRemoteToken
           || storedManagedRemoteToken;
-        const requestSessionTtlMs = typeof _req?.body?.sessionTtlMs === 'number' && Number.isFinite(_req.body.sessionTtlMs)
-          ? normalizeTunnelSessionTtlMs(_req.body.sessionTtlMs)
-          : undefined;
-        const sessionTtlMs = requestSessionTtlMs ?? normalizeTunnelSessionTtlMs(settings?.tunnelSessionTtlMs);
-
         const previousTunnelId = tunnelAuthController.getActiveTunnelId();
         const previousMode = tunnelAuthController.getActiveTunnelMode();
         const previousProvider = tunnelService.resolveActiveProvider();
@@ -496,11 +478,6 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           || previousProvider !== activeProvider
           || previousUrl !== publicUrl
         );
-        let invalidatedSessionCount = 0;
-        if (replacedTunnel && previousTunnelId) {
-          const revoked = tunnelAuthController.revokeTunnelArtifacts(previousTunnelId);
-          invalidatedSessionCount = revoked.invalidatedSessionCount;
-        }
 
         tunnelAuthController.setActiveTunnel({
           tunnelId: replacedTunnel || !previousTunnelId ? crypto.randomUUID() : previousTunnelId,
@@ -527,14 +504,8 @@ export const createTunnelRoutesRuntime = (dependencies) => {
               url: previousUrl,
             }
             : null,
-          invalidatedSessionCount,
-          policy: 'tunnel-gated',
           activeTunnelMode: mode,
-          activeSessions: tunnelAuthController.listTunnelSessions(),
           localPort: getActivePort(),
-          ttlConfig: {
-            sessionTtlMs,
-          },
         });
       } catch (error) {
         console.error('Failed to start tunnel:', error);
@@ -553,21 +524,13 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     });
 
     app.post('/api/openchamber/tunnel/stop', (_req, res) => {
-      let invalidatedSessionCount = 0;
-      const activeTunnelId = tunnelAuthController.getActiveTunnelId();
-
-      if (activeTunnelId) {
-        const revoked = tunnelAuthController.revokeTunnelArtifacts(activeTunnelId);
-        invalidatedSessionCount = revoked.invalidatedSessionCount;
-      }
-
       if (getActiveTunnelController()) {
         console.log('Stopping active tunnel (user requested)...');
         tunnelService.stop();
       }
 
       tunnelAuthController.clearActiveTunnel();
-      res.json({ ok: true, invalidatedSessionCount });
+      res.json({ ok: true });
     });
   };
 

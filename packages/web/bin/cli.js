@@ -35,16 +35,6 @@ const TUNNEL_PROFILES_VERSION = 1;
 const TUNNEL_PROFILES_FILE_NAME = 'tunnel-profiles.json';
 const LEGACY_CLOUDFLARE_MANAGED_REMOTE_FILE_NAME = 'cloudflare-managed-remote-tunnels.json';
 const TUNNEL_CLI_STATE_FILE_NAME = 'tunnel-cli-state.json';
-const TUNNEL_SESSION_TTL_DEFAULT_MS = 8 * 60 * 60 * 1000;
-const TUNNEL_SESSION_TTL_MIN_MS = 5 * 60 * 1000;
-const TUNNEL_SESSION_TTL_MAX_MS = 24 * 60 * 60 * 1000;
-const SESSION_TTL_PICKER_OPTIONS = [
-  { value: String(60 * 60 * 1000), label: '1h' },
-  { value: String(TUNNEL_SESSION_TTL_DEFAULT_MS), label: '8h' },
-  { value: String(12 * 60 * 60 * 1000), label: '12h' },
-  { value: String(24 * 60 * 60 * 1000), label: '24h' },
-  { value: '__custom__', label: 'Custom' },
-];
 const PACKAGE_JSON = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
 const DEFAULT_TUNNEL_PROVIDER_CAPABILITIES = [cloudflareTunnelProviderCapabilities];
 
@@ -267,7 +257,6 @@ function buildTunnelStartReplayCommand({
   profileName,
   configPath,
   hostname,
-  sessionTtlMs,
   qr,
   noQr,
   includeTokenPlaceholder,
@@ -292,10 +281,6 @@ function buildTunnelStartReplayCommand({
   }
   if (typeof hostname === 'string' && hostname.trim().length > 0) {
     parts.push('--hostname', shellQuote(hostname));
-  }
-  const sessionTtl = formatDurationForCli(sessionTtlMs);
-  if (sessionTtl) {
-    parts.push('--session-ttl', sessionTtl);
   }
   if (qr) parts.push('--qr');
   if (noQr) parts.push('--no-qr');
@@ -332,62 +317,6 @@ function buildTunnelProfileAddCommand({ provider, hostname }) {
   ];
   return parts.join(' ');
 }
-
-async function resolveTunnelTtlOverrides(options) {
-  let sessionTtlRaw = typeof options.sessionTtl === 'string' ? options.sessionTtl : undefined;
-
-  const shouldPrompt = !sessionTtlRaw && canPrompt(options);
-
-  if (shouldPrompt) {
-    const sessionChoice = await clackSelect({
-      message: 'Select session TTL',
-      options: SESSION_TTL_PICKER_OPTIONS,
-    });
-    if (clackIsCancel(sessionChoice)) {
-      clackCancel('Tunnel start cancelled.');
-      return null;
-    }
-    if (sessionChoice === '__custom__') {
-      const enteredSession = await clackText({
-        message: 'Enter session TTL (e.g. 8h, 24h, 1d)',
-        placeholder: '8h',
-        validate(value) {
-          try {
-            parseTtlMsOrThrow(value, {
-              flagName: '--session-ttl',
-              minMs: TUNNEL_SESSION_TTL_MIN_MS,
-              maxMs: TUNNEL_SESSION_TTL_MAX_MS,
-            });
-            return undefined;
-          } catch (error) {
-            return error instanceof Error ? error.message : 'Invalid TTL value';
-          }
-        },
-      });
-      if (clackIsCancel(enteredSession)) {
-        clackCancel('Tunnel start cancelled.');
-        return null;
-      }
-      sessionTtlRaw = enteredSession.trim();
-    } else {
-      sessionTtlRaw = sessionChoice;
-    }
-  }
-
-  const sessionTtlMs = sessionTtlRaw !== undefined
-    ? parseTtlMsOrThrow(sessionTtlRaw, {
-      flagName: '--session-ttl',
-      minMs: TUNNEL_SESSION_TTL_MIN_MS,
-      maxMs: TUNNEL_SESSION_TTL_MAX_MS,
-    })
-    : undefined;
-
-  return {
-    sessionTtlMs,
-  };
-}
-
-
 
 function levenshteinDistance(a, b) {
   const m = a.length;
@@ -525,7 +454,6 @@ function parseArgs(argv = process.argv.slice(2)) {
     tokenFile: undefined,
     tokenStdin: false,
     hostname: undefined,
-    sessionTtl: undefined,
     qr: false,
     explicitQr: false,
     force: false,
@@ -664,12 +592,6 @@ function parseArgs(argv = process.argv.slice(2)) {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
         options.hostname = typeof value === 'string' ? value : options.hostname;
-        break;
-      }
-      case 'session-ttl': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.sessionTtl = typeof value === 'string' ? value : options.sessionTtl;
         break;
       }
       case 'json':
@@ -846,7 +768,6 @@ START OPTIONS:
   --token-file <path>     Read token from file (recommended)
   --token-stdin           Read token from stdin
   --hostname <hostname>   Managed-remote hostname
-  --session-ttl <value>   Session TTL (e.g. 8h, 24h, 1d)
   --qr                    Print QR code for resulting tunnel URL
   --no-qr                 Disable QR output
   --dry-run               Validate inputs without applying changes
@@ -906,7 +827,7 @@ _openchamber_tunnel() {
   tunnel_commands="help providers ready doctor status start stop profile completion"
   profile_commands="list show add remove"
   common_flags="--port --foreground --no-daemon --json --all --help --version --plain --quiet"
-  start_flags="--provider --mode --profile --config --token --token-file --token-stdin --hostname --session-ttl --qr --no-qr --dry-run --show-secrets"
+  start_flags="--provider --mode --profile --config --token --token-file --token-stdin --hostname --qr --no-qr --dry-run --show-secrets"
 
   if [[ \${COMP_CWORD} -eq 1 ]]; then
     COMPREPLY=( $(compgen -W "\${commands}" -- "\${cur}") )
@@ -4072,12 +3993,6 @@ const commands = {
           }
         }
 
-        const ttlOverrides = await resolveTunnelTtlOverrides(options);
-        if (ttlOverrides === null) {
-          return;
-        }
-        const { sessionTtlMs } = ttlOverrides;
-
         if (options.dryRun) {
           const dryRunResult = {
             ok: true,
@@ -4088,7 +4003,6 @@ const commands = {
             hasToken: typeof token === 'string' && token.trim().length > 0,
             profile: selectedProfile ? selectedProfile.name : null,
             configPath: options.configPath || null,
-            sessionTtlMs: sessionTtlMs ?? null,
           };
           if (isJsonMode(options)) {
             printJson(dryRunResult);
@@ -4218,7 +4132,6 @@ const commands = {
         const payload = {
           provider,
           mode,
-          ...(typeof sessionTtlMs === 'number' ? { sessionTtlMs } : {}),
           ...(options.configPath === null ? { configPath: null } : {}),
           ...(typeof options.configPath === 'string' ? { configPath: options.configPath } : {}),
           ...(typeof token === 'string' ? { token } : {}),
@@ -4273,7 +4186,6 @@ const commands = {
           profileName: selectedProfile?.name,
           configPath: options.configPath,
           hostname,
-          sessionTtlMs,
           qr: options.qr === true,
           noQr: options.noQr === true,
           includeTokenPlaceholder: !selectedProfile && mode === 'managed-remote' && typeof token === 'string' && token.trim().length > 0,
@@ -4292,13 +4204,8 @@ const commands = {
           logStatus('success', `port ${instance.port} ${clackFormatProviderWithIcon(body.provider)}/${body.mode}`);
           logStatus('success', body.url || 'n/a');
           if (body.replacedTunnel) {
-            const invalidatedSessionCount = Number.isFinite(body.invalidatedSessionCount) ? body.invalidatedSessionCount : 0;
             const previousMode = typeof body?.replaced?.mode === 'string' ? body.replaced.mode : 'unknown';
-            logStatus(
-              'warning',
-              `replaced previous ${previousMode} tunnel`,
-              `invalidated ${invalidatedSessionCount} session(s)`,
-            );
+            logStatus('warning', `replaced previous ${previousMode} tunnel`);
           }
           clackOutro('');
 
@@ -4392,7 +4299,7 @@ const commands = {
             logStatus('error', `port ${result.port} failed`, result.error);
             continue;
           }
-          logStatus('success', `port ${result.port} stopped`, `revoked ${result.result?.revokedBootstrapCount || 0}, invalidated ${result.result?.invalidatedSessionCount || 0}`);
+          logStatus('success', `port ${result.port} stopped`);
         }
         clackOutro(`${results.length} instance(s)`);
         return;
