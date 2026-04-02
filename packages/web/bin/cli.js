@@ -35,20 +35,9 @@ const TUNNEL_PROFILES_VERSION = 1;
 const TUNNEL_PROFILES_FILE_NAME = 'tunnel-profiles.json';
 const LEGACY_CLOUDFLARE_MANAGED_REMOTE_FILE_NAME = 'cloudflare-managed-remote-tunnels.json';
 const TUNNEL_CLI_STATE_FILE_NAME = 'tunnel-cli-state.json';
-const TUNNEL_BOOTSTRAP_TTL_DEFAULT_MS = 30 * 60 * 1000;
-const TUNNEL_BOOTSTRAP_TTL_MIN_MS = 60 * 1000;
-const TUNNEL_BOOTSTRAP_TTL_MAX_MS = 24 * 60 * 60 * 1000;
 const TUNNEL_SESSION_TTL_DEFAULT_MS = 8 * 60 * 60 * 1000;
 const TUNNEL_SESSION_TTL_MIN_MS = 5 * 60 * 1000;
 const TUNNEL_SESSION_TTL_MAX_MS = 24 * 60 * 60 * 1000;
-const CONNECT_TTL_PICKER_OPTIONS = [
-  { value: String(3 * 60 * 1000), label: '3m' },
-  { value: String(TUNNEL_BOOTSTRAP_TTL_DEFAULT_MS), label: '30m' },
-  { value: String(2 * 60 * 60 * 1000), label: '2h' },
-  { value: String(8 * 60 * 60 * 1000), label: '8h' },
-  { value: String(24 * 60 * 60 * 1000), label: '24h' },
-  { value: '__custom__', label: 'Custom' },
-];
 const SESSION_TTL_PICKER_OPTIONS = [
   { value: String(60 * 60 * 1000), label: '1h' },
   { value: String(TUNNEL_SESSION_TTL_DEFAULT_MS), label: '8h' },
@@ -278,7 +267,6 @@ function buildTunnelStartReplayCommand({
   profileName,
   configPath,
   hostname,
-  connectTtlMs,
   sessionTtlMs,
   qr,
   noQr,
@@ -304,10 +292,6 @@ function buildTunnelStartReplayCommand({
   }
   if (typeof hostname === 'string' && hostname.trim().length > 0) {
     parts.push('--hostname', shellQuote(hostname));
-  }
-  const connectTtl = formatDurationForCli(connectTtlMs);
-  if (connectTtl) {
-    parts.push('--connect-ttl', connectTtl);
   }
   const sessionTtl = formatDurationForCli(sessionTtlMs);
   if (sessionTtl) {
@@ -350,48 +334,11 @@ function buildTunnelProfileAddCommand({ provider, hostname }) {
 }
 
 async function resolveTunnelTtlOverrides(options) {
-  let connectTtlRaw = typeof options.connectTtl === 'string' ? options.connectTtl : undefined;
   let sessionTtlRaw = typeof options.sessionTtl === 'string' ? options.sessionTtl : undefined;
 
-  const shouldPrompt = !connectTtlRaw
-    && !sessionTtlRaw
-    && canPrompt(options);
+  const shouldPrompt = !sessionTtlRaw && canPrompt(options);
 
   if (shouldPrompt) {
-    const connectChoice = await clackSelect({
-      message: 'Select connect-link TTL',
-      options: CONNECT_TTL_PICKER_OPTIONS,
-    });
-    if (clackIsCancel(connectChoice)) {
-      clackCancel('Tunnel start cancelled.');
-      return null;
-    }
-    if (connectChoice === '__custom__') {
-      const enteredConnect = await clackText({
-        message: 'Enter connect-link TTL (e.g. 30m, 2h, 1d)',
-        placeholder: '30m',
-        validate(value) {
-          try {
-            parseTtlMsOrThrow(value, {
-              flagName: '--connect-ttl',
-              minMs: TUNNEL_BOOTSTRAP_TTL_MIN_MS,
-              maxMs: TUNNEL_BOOTSTRAP_TTL_MAX_MS,
-            });
-            return undefined;
-          } catch (error) {
-            return error instanceof Error ? error.message : 'Invalid TTL value';
-          }
-        },
-      });
-      if (clackIsCancel(enteredConnect)) {
-        clackCancel('Tunnel start cancelled.');
-        return null;
-      }
-      connectTtlRaw = enteredConnect.trim();
-    } else {
-      connectTtlRaw = connectChoice;
-    }
-
     const sessionChoice = await clackSelect({
       message: 'Select session TTL',
       options: SESSION_TTL_PICKER_OPTIONS,
@@ -427,14 +374,6 @@ async function resolveTunnelTtlOverrides(options) {
     }
   }
 
-  const connectTtlMs = connectTtlRaw !== undefined
-    ? parseTtlMsOrThrow(connectTtlRaw, {
-      flagName: '--connect-ttl',
-      minMs: TUNNEL_BOOTSTRAP_TTL_MIN_MS,
-      maxMs: TUNNEL_BOOTSTRAP_TTL_MAX_MS,
-    })
-    : undefined;
-
   const sessionTtlMs = sessionTtlRaw !== undefined
     ? parseTtlMsOrThrow(sessionTtlRaw, {
       flagName: '--session-ttl',
@@ -444,7 +383,6 @@ async function resolveTunnelTtlOverrides(options) {
     : undefined;
 
   return {
-    connectTtlMs,
     sessionTtlMs,
   };
 }
@@ -587,7 +525,6 @@ function parseArgs(argv = process.argv.slice(2)) {
     tokenFile: undefined,
     tokenStdin: false,
     hostname: undefined,
-    connectTtl: undefined,
     sessionTtl: undefined,
     qr: false,
     explicitQr: false,
@@ -727,12 +664,6 @@ function parseArgs(argv = process.argv.slice(2)) {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
         options.hostname = typeof value === 'string' ? value : options.hostname;
-        break;
-      }
-      case 'connect-ttl': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.connectTtl = typeof value === 'string' ? value : options.connectTtl;
         break;
       }
       case 'session-ttl': {
@@ -915,7 +846,6 @@ START OPTIONS:
   --token-file <path>     Read token from file (recommended)
   --token-stdin           Read token from stdin
   --hostname <hostname>   Managed-remote hostname
-  --connect-ttl <value>   Connect-link TTL (e.g. 30m, 24h, 1d)
   --session-ttl <value>   Session TTL (e.g. 8h, 24h, 1d)
   --qr                    Print QR code for resulting tunnel URL
   --no-qr                 Disable QR output
@@ -929,8 +859,7 @@ OUTPUT OPTIONS:
 
 BEHAVIOR NOTES:
   - One active tunnel per OpenChamber instance.
-  - Starting a different mode/provider replaces the current tunnel and revokes old connect links/sessions.
-  - Connect links are one-time; generating a new link revokes the previous unused link.
+  - Starting a different mode/provider replaces the current tunnel and invalidates old sessions.
 
 PROFILE USAGE:
   openchamber tunnel profile list [--provider <id>] [--json]
@@ -977,7 +906,7 @@ _openchamber_tunnel() {
   tunnel_commands="help providers ready doctor status start stop profile completion"
   profile_commands="list show add remove"
   common_flags="--port --foreground --no-daemon --json --all --help --version --plain --quiet"
-  start_flags="--provider --mode --profile --config --token --token-file --token-stdin --hostname --connect-ttl --session-ttl --qr --no-qr --dry-run --show-secrets"
+  start_flags="--provider --mode --profile --config --token --token-file --token-stdin --hostname --session-ttl --qr --no-qr --dry-run --show-secrets"
 
   if [[ \${COMP_CWORD} -eq 1 ]]; then
     COMPREPLY=( $(compgen -W "\${commands}" -- "\${cur}") )
@@ -3841,17 +3770,6 @@ const commands = {
               });
             }
 
-            if (isManagedRemote && hasTokenIssue) {
-              troubleshootingHints.push({
-                key: 'managed-remote-token',
-                code: '[QR_PREFETCH_TOKEN]',
-                lines: [
-                  'Some QR readers pre-fetch scanned URLs.',
-                  'Pre-fetch can consume one-time bootstrap tokens.',
-                  'If validation fails, generate a fresh token/QR and use it immediately in one browser/device.',
-                ],
-              });
-            }
           }
         }
         clackOutro(totalBlockers > 0 ? `Done (${totalBlockers} ${totalBlockers === 1 ? 'issue' : 'issues'})` : 'All modes ready');
@@ -4158,7 +4076,7 @@ const commands = {
         if (ttlOverrides === null) {
           return;
         }
-        const { connectTtlMs, sessionTtlMs } = ttlOverrides;
+        const { sessionTtlMs } = ttlOverrides;
 
         if (options.dryRun) {
           const dryRunResult = {
@@ -4170,7 +4088,6 @@ const commands = {
             hasToken: typeof token === 'string' && token.trim().length > 0,
             profile: selectedProfile ? selectedProfile.name : null,
             configPath: options.configPath || null,
-            connectTtlMs: connectTtlMs ?? null,
             sessionTtlMs: sessionTtlMs ?? null,
           };
           if (isJsonMode(options)) {
@@ -4301,7 +4218,6 @@ const commands = {
         const payload = {
           provider,
           mode,
-          ...(typeof connectTtlMs === 'number' ? { connectTtlMs } : {}),
           ...(typeof sessionTtlMs === 'number' ? { sessionTtlMs } : {}),
           ...(options.configPath === null ? { configPath: null } : {}),
           ...(typeof options.configPath === 'string' ? { configPath: options.configPath } : {}),
@@ -4357,7 +4273,6 @@ const commands = {
           profileName: selectedProfile?.name,
           configPath: options.configPath,
           hostname,
-          connectTtlMs,
           sessionTtlMs,
           qr: options.qr === true,
           noQr: options.noQr === true,
@@ -4369,21 +4284,20 @@ const commands = {
         if (isJsonMode(options)) {
           printJson({ port: instance.port, replayCommand, ...body });
         } else if (isQuietMode(options)) {
-          const quietUrl = body.connectUrl || body.url || 'n/a';
+          const quietUrl = body.url || 'n/a';
           process.stdout.write(`port ${instance.port} ${quietUrl}\n`);
         } else {
           console.log('');
           clackIntro(boldText('Tunnel Started'));
           logStatus('success', `port ${instance.port} ${clackFormatProviderWithIcon(body.provider)}/${body.mode}`);
-          logStatus('success', body.connectUrl || body.url || 'n/a');
+          logStatus('success', body.url || 'n/a');
           if (body.replacedTunnel) {
-            const revokedBootstrapCount = Number.isFinite(body.revokedBootstrapCount) ? body.revokedBootstrapCount : 0;
             const invalidatedSessionCount = Number.isFinite(body.invalidatedSessionCount) ? body.invalidatedSessionCount : 0;
             const previousMode = typeof body?.replaced?.mode === 'string' ? body.replaced.mode : 'unknown';
             logStatus(
               'warning',
               `replaced previous ${previousMode} tunnel`,
-              `revoked ${revokedBootstrapCount}, invalidated ${invalidatedSessionCount}`,
+              `invalidated ${invalidatedSessionCount} session(s)`,
             );
           }
           clackOutro('');
@@ -4411,7 +4325,7 @@ const commands = {
         setCancelCleanup(null);
 
         if (shouldDisplayTunnelQr(options)) {
-          const url = body.connectUrl || body.url;
+          const url = body.url;
           if (typeof url === 'string' && url.length > 0) {
             await displayTunnelQrCode(url);
           }
