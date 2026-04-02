@@ -1,12 +1,6 @@
 import crypto from 'crypto';
 
-const BOOTSTRAP_TOKEN_COOKIE_SAFE_BYTES = 32;
 const TUNNEL_SESSION_COOKIE_NAME = 'oc_tunnel_session';
-
-const CONNECT_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
-const CONNECT_RATE_LIMIT_LOCK_MS = 10 * 60 * 1000;
-const CONNECT_RATE_LIMIT_MAX_ATTEMPTS = 20;
-const CONNECT_RATE_LIMIT_NO_IP_MAX_ATTEMPTS = 5;
 
 const parseCookies = (cookieHeader) => {
   if (!cookieHeader || typeof cookieHeader !== 'string') {
@@ -66,8 +60,6 @@ const buildCookie = ({ name, value, maxAge, secure }) => {
 };
 
 const nowTs = () => Date.now();
-
-const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 
 const normalizeHost = (candidate) => {
   if (typeof candidate !== 'string') {
@@ -183,50 +175,13 @@ const isLocalHost = (host, req) => {
   return false;
 };
 
-const getClientIp = (req) => {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string') {
-    const ip = forwarded.split(',')[0].trim();
-    if (ip.startsWith('::ffff:')) {
-      return ip.substring(7);
-    }
-    return ip;
-  }
-
-  const ip = req.ip || req.connection?.remoteAddress;
-  if (ip) {
-    if (ip.startsWith('::ffff:')) {
-      return ip.substring(7);
-    }
-    return ip;
-  }
-  return null;
-};
-
-const getRateLimitKey = (req) => {
-  const ip = getClientIp(req);
-  if (ip) {
-    return ip;
-  }
-  return 'connect-rate-limit:no-ip';
-};
-
-const rateLimitMaxForKey = (key) => {
-  if (key === 'connect-rate-limit:no-ip') {
-    return CONNECT_RATE_LIMIT_NO_IP_MAX_ATTEMPTS;
-  }
-  return CONNECT_RATE_LIMIT_MAX_ATTEMPTS;
-};
-
 export const createTunnelAuth = () => {
   let activeTunnelId = null;
   let activeTunnelHost = null;
   let activeTunnelMode = null;
   let activeTunnelPublicUrl = null;
-  let bootstrapRecord = null;
 
   const tunnelSessions = new Map();
-  const connectRateLimiter = new Map();
 
   const clearTunnelSessionCookie = (req, res) => {
     const secure = isSecureRequest(req);
@@ -270,19 +225,6 @@ export const createTunnelAuth = () => {
     return 'unknown-public';
   };
 
-  const revokeBootstrapToken = () => {
-    if (!bootstrapRecord) {
-      return 0;
-    }
-    if (bootstrapRecord.revokedAt) {
-      return 0;
-    }
-    if (!bootstrapRecord.revokedAt) {
-      bootstrapRecord.revokedAt = nowTs();
-    }
-    return 1;
-  };
-
   const invalidateTunnelSessions = (tunnelId, reason = 'tunnel-stopped') => {
     const revokedAt = nowTs();
     let count = 0;
@@ -297,11 +239,8 @@ export const createTunnelAuth = () => {
   };
 
   const revokeTunnelArtifacts = (tunnelId) => {
-    const revokedBootstrapCount = bootstrapRecord && bootstrapRecord.tunnelId === tunnelId
-      ? revokeBootstrapToken()
-      : 0;
     const invalidatedSessionCount = invalidateTunnelSessions(tunnelId, 'tunnel-revoked');
-    return { revokedBootstrapCount, invalidatedSessionCount };
+    return { invalidatedSessionCount };
   };
 
   const setActiveTunnel = ({ tunnelId, publicUrl, mode = null }) => {
@@ -323,113 +262,6 @@ export const createTunnelAuth = () => {
     activeTunnelHost = null;
     activeTunnelMode = null;
     activeTunnelPublicUrl = null;
-    bootstrapRecord = null;
-  };
-
-  const isBootstrapRecordUsable = (record) => {
-    if (!record || record.revokedAt || record.usedAt) {
-      return false;
-    }
-    if (typeof record.expiresAt === 'number' && nowTs() >= record.expiresAt) {
-      return false;
-    }
-    return true;
-  };
-
-  const issueBootstrapToken = ({ ttlMs }) => {
-    if (!activeTunnelId) {
-      throw new Error('Tunnel is not active');
-    }
-
-    revokeBootstrapToken();
-
-    const token = crypto.randomBytes(BOOTSTRAP_TOKEN_COOKIE_SAFE_BYTES).toString('base64url');
-    const issuedAt = nowTs();
-    const expiresAt = Number.isFinite(ttlMs) && ttlMs > 0 ? issuedAt + ttlMs : null;
-
-    bootstrapRecord = {
-      id: crypto.randomUUID(),
-      tunnelId: activeTunnelId,
-      tokenHash: hashToken(token),
-      issuedAt,
-      expiresAt,
-      usedAt: null,
-      revokedAt: null,
-    };
-
-    return {
-      token,
-      expiresAt,
-    };
-  };
-
-  const getBootstrapStatus = () => {
-    if (!isBootstrapRecordUsable(bootstrapRecord)) {
-      return {
-        hasBootstrapToken: false,
-        bootstrapExpiresAt: null,
-      };
-    }
-
-    return {
-      hasBootstrapToken: true,
-      bootstrapExpiresAt: bootstrapRecord.expiresAt,
-    };
-  };
-
-  const checkConnectRateLimit = (req) => {
-    const key = getRateLimitKey(req);
-    const now = nowTs();
-    const maxAttempts = rateLimitMaxForKey(key);
-    const record = connectRateLimiter.get(key);
-
-    if (record?.lockedUntil && now < record.lockedUntil) {
-      return {
-        allowed: false,
-        retryAfter: Math.ceil((record.lockedUntil - now) / 1000),
-      };
-    }
-
-    if (!record || now - record.lastAttempt > CONNECT_RATE_LIMIT_WINDOW_MS) {
-      return { allowed: true, retryAfter: 0 };
-    }
-
-    if (record.count >= maxAttempts) {
-      const lockedUntil = now + CONNECT_RATE_LIMIT_LOCK_MS;
-      connectRateLimiter.set(key, {
-        count: record.count + 1,
-        lastAttempt: now,
-        lockedUntil,
-      });
-      return {
-        allowed: false,
-        retryAfter: Math.ceil(CONNECT_RATE_LIMIT_LOCK_MS / 1000),
-      };
-    }
-
-    return { allowed: true, retryAfter: 0 };
-  };
-
-  const recordConnectFailedAttempt = (req) => {
-    const key = getRateLimitKey(req);
-    const now = nowTs();
-    const record = connectRateLimiter.get(key);
-
-    if (!record || now - record.lastAttempt > CONNECT_RATE_LIMIT_WINDOW_MS) {
-      connectRateLimiter.set(key, { count: 1, lastAttempt: now, lockedUntil: null });
-      return;
-    }
-
-    connectRateLimiter.set(key, {
-      count: record.count + 1,
-      lastAttempt: now,
-      lockedUntil: record.lockedUntil || null,
-    });
-  };
-
-  const clearConnectRateLimit = (req) => {
-    const key = getRateLimitKey(req);
-    connectRateLimiter.delete(key);
   };
 
   const getTunnelSessionFromRequest = (req) => {
@@ -472,74 +304,6 @@ export const createTunnelAuth = () => {
     });
   };
 
-  const exchangeBootstrapToken = ({ req, res, token, sessionTtlMs }) => {
-    const rateLimit = checkConnectRateLimit(req);
-    if (!rateLimit.allowed) {
-      return {
-        ok: false,
-        reason: 'rate-limited',
-        retryAfter: rateLimit.retryAfter,
-      };
-    }
-
-    if (!activeTunnelId || !bootstrapRecord) {
-      recordConnectFailedAttempt(req);
-      return { ok: false, reason: 'inactive' };
-    }
-
-    if (!token || typeof token !== 'string') {
-      recordConnectFailedAttempt(req);
-      return { ok: false, reason: 'missing-token' };
-    }
-
-    if (!isBootstrapRecordUsable(bootstrapRecord)) {
-      recordConnectFailedAttempt(req);
-      return { ok: false, reason: 'expired' };
-    }
-
-    if (bootstrapRecord.tunnelId !== activeTunnelId) {
-      recordConnectFailedAttempt(req);
-      return { ok: false, reason: 'tunnel-mismatch' };
-    }
-
-    const incomingHash = hashToken(token);
-    const expected = bootstrapRecord.tokenHash;
-    const validHash = incomingHash.length === expected.length
-      && crypto.timingSafeEqual(Buffer.from(incomingHash), Buffer.from(expected));
-
-    if (!validHash) {
-      recordConnectFailedAttempt(req);
-      return { ok: false, reason: 'invalid-token' };
-    }
-
-    bootstrapRecord.usedAt = nowTs();
-    clearConnectRateLimit(req);
-
-    const sessionId = crypto.randomBytes(32).toString('base64url');
-    const createdAt = nowTs();
-    const expiresAt = createdAt + sessionTtlMs;
-
-    tunnelSessions.set(sessionId, {
-      sessionId,
-      tunnelId: activeTunnelId,
-      mode: activeTunnelMode,
-      publicUrl: activeTunnelPublicUrl,
-      createdAt,
-      lastSeenAt: createdAt,
-      expiresAt,
-      revokedAt: null,
-      revokedReason: null,
-      expiredAt: null,
-    });
-
-    setTunnelSessionCookie(req, res, sessionId, sessionTtlMs);
-
-    return {
-      ok: true,
-      sessionExpiresAt: expiresAt,
-    };
-  };
-
   const listTunnelSessions = () => {
     const now = nowTs();
 
@@ -577,11 +341,8 @@ export const createTunnelAuth = () => {
     setActiveTunnel,
     clearActiveTunnel,
     revokeTunnelArtifacts,
-    issueBootstrapToken,
-    getBootstrapStatus,
     requireTunnelSession,
     getTunnelSessionFromRequest,
-    exchangeBootstrapToken,
     listTunnelSessions,
     clearTunnelSessionCookie,
     getActiveTunnelId: () => activeTunnelId,

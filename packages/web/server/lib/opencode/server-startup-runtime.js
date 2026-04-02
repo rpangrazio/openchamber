@@ -3,8 +3,6 @@ export const createServerStartupRuntime = (dependencies) => {
     process,
     crypto,
     server,
-    normalizeTunnelBootstrapTtlMs,
-    readSettingsFromDiskMigrated,
     tunnelAuthController,
     startTunnelWithNormalizedRequest,
     gracefulShutdown,
@@ -78,20 +76,13 @@ export const createServerStartupRuntime = (dependencies) => {
                 publicUrl,
                 mode,
               });
-              const settings = await readSettingsFromDiskMigrated();
-              const bootstrapTtlMs = settings?.tunnelBootstrapTtlMs === null
-                ? null
-                : normalizeTunnelBootstrapTtlMs(settings?.tunnelBootstrapTtlMs);
-              const bootstrapToken = tunnelAuthController.issueBootstrapToken({ ttlMs: bootstrapTtlMs });
-              const connectUrl = `${publicUrl.replace(/\/$/, '')}/connect?t=${encodeURIComponent(bootstrapToken.token)}`;
               if (onTunnelReady) {
-                onTunnelReady(publicUrl, connectUrl);
+                onTunnelReady(publicUrl, null);
               } else {
-                console.log(`\n🌐 Tunnel URL: ${connectUrl}`);
-                console.log('🔑 One-time connect link (expires after first use)\n');
+                console.log(`\n🌐 Tunnel URL: ${publicUrl}\n`);
               }
             } else if (onTunnelReady) {
-              onTunnelReady(publicUrl, null);
+              onTunnelReady(null, null);
             }
           } catch (error) {
             console.error(`Failed to start tunnel: ${error.message}`);

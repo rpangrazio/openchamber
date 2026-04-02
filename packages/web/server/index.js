@@ -80,9 +80,6 @@ const MODELS_METADATA_CACHE_TTL = 5 * 60 * 1000;
 const CLIENT_RELOAD_DELAY_MS = 800;
 const OPEN_CODE_READY_GRACE_MS = 12000;
 const LONG_REQUEST_TIMEOUT_MS = 4 * 60 * 1000;
-const TUNNEL_BOOTSTRAP_TTL_DEFAULT_MS = 30 * 60 * 1000;
-const TUNNEL_BOOTSTRAP_TTL_MIN_MS = 60 * 1000;
-const TUNNEL_BOOTSTRAP_TTL_MAX_MS = 24 * 60 * 60 * 1000;
 const TUNNEL_SESSION_TTL_DEFAULT_MS = 8 * 60 * 60 * 1000;
 const TUNNEL_SESSION_TTL_MIN_MS = 5 * 60 * 1000;
 const TUNNEL_SESSION_TTL_MAX_MS = 24 * 60 * 60 * 1000;
@@ -104,9 +101,6 @@ const settingsNormalizationRuntime = createSettingsNormalizationRuntime({
   os,
   path,
   processLike: process,
-  tunnelBootstrapTtlDefaultMs: TUNNEL_BOOTSTRAP_TTL_DEFAULT_MS,
-  tunnelBootstrapTtlMinMs: TUNNEL_BOOTSTRAP_TTL_MIN_MS,
-  tunnelBootstrapTtlMaxMs: TUNNEL_BOOTSTRAP_TTL_MAX_MS,
   tunnelSessionTtlDefaultMs: TUNNEL_SESSION_TTL_DEFAULT_MS,
   tunnelSessionTtlMinMs: TUNNEL_SESSION_TTL_MIN_MS,
   tunnelSessionTtlMaxMs: TUNNEL_SESSION_TTL_MAX_MS,
@@ -115,7 +109,6 @@ const settingsNormalizationRuntime = createSettingsNormalizationRuntime({
 const normalizeDirectoryPath = (...args) => settingsNormalizationRuntime.normalizeDirectoryPath(...args);
 const normalizePathForPersistence = (...args) => settingsNormalizationRuntime.normalizePathForPersistence(...args);
 const normalizeSettingsPaths = (...args) => settingsNormalizationRuntime.normalizeSettingsPaths(...args);
-const normalizeTunnelBootstrapTtlMs = (...args) => settingsNormalizationRuntime.normalizeTunnelBootstrapTtlMs(...args);
 const normalizeTunnelSessionTtlMs = (...args) => settingsNormalizationRuntime.normalizeTunnelSessionTtlMs(...args);
 const normalizeManagedRemoteTunnelHostname = (...args) =>
   settingsNormalizationRuntime.normalizeManagedRemoteTunnelHostname(...args);
@@ -193,7 +186,6 @@ const resolveManagedRemoteTunnelToken = (...args) => managedTunnelConfigRuntime.
 const settingsHelpers = createSettingsHelpers({
   normalizePathForPersistence,
   normalizeDirectoryPath,
-  normalizeTunnelBootstrapTtlMs,
   normalizeTunnelSessionTtlMs,
   normalizeTunnelProvider,
   normalizeTunnelMode,
@@ -642,7 +634,6 @@ const tunnelWiringRuntime = createTunnelWiringRuntime({
   normalizeTunnelMode,
   normalizeOptionalPath,
   normalizeManagedRemoteTunnelHostname,
-  normalizeTunnelBootstrapTtlMs,
   normalizeTunnelSessionTtlMs,
   isSupportedTunnelMode,
   upsertManagedRemoteTunnelToken,
@@ -935,8 +926,6 @@ async function main(options = {}) {
     staticRoutesRuntime,
     process,
     crypto,
-    normalizeTunnelBootstrapTtlMs,
-    readSettingsFromDiskMigrated,
     tunnelAuthController,
     startTunnelWithNormalizedRequest,
     gracefulShutdown,

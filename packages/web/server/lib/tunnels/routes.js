@@ -11,7 +11,6 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     normalizeTunnelMode,
     normalizeOptionalPath,
     normalizeManagedRemoteTunnelHostname,
-    normalizeTunnelBootstrapTtlMs,
     normalizeTunnelSessionTtlMs,
     isSupportedTunnelMode,
     upsertManagedRemoteTunnelToken,
@@ -334,9 +333,6 @@ export const createTunnelRoutesRuntime = (dependencies) => {
         }));
         const hasStoredManagedRemoteToken = typeof settings?.managedRemoteTunnelToken === 'string' && settings.managedRemoteTunnelToken.trim().length > 0;
         const hasManagedRemoteTunnelToken = getRuntimeManagedRemoteTunnelToken().length > 0 || managedRemoteTunnelConfig.tunnels.length > 0 || hasStoredManagedRemoteToken;
-        const bootstrapTtlMs = settings?.tunnelBootstrapTtlMs === null
-          ? null
-          : normalizeTunnelBootstrapTtlMs(settings?.tunnelBootstrapTtlMs);
         const sessionTtlMs = normalizeTunnelSessionTtlMs(settings?.tunnelSessionTtlMs);
         const activeSessions = tunnelAuthController.listTunnelSessions();
         const activeProvider = tunnelService.resolveActiveProvider();
@@ -354,14 +350,11 @@ export const createTunnelRoutesRuntime = (dependencies) => {
             managedRemoteTunnelHostname: managedRemoteHostname || null,
             managedRemoteTunnelPresets: managedRemoteTunnelPresetSummaries,
             managedRemoteTunnelTokenPresetIds: managedRemoteTunnelConfig.tunnels.map((entry) => entry.id),
-            hasBootstrapToken: false,
-            bootstrapExpiresAt: null,
             policy: 'tunnel-gated',
             activeTunnelMode: tunnelAuthController.getActiveTunnelMode() || null,
             activeSessions,
             localPort: getActivePort(),
             ttlConfig: {
-              bootstrapTtlMs,
               sessionTtlMs,
             },
           });
@@ -385,7 +378,6 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           });
         }
 
-        const bootstrapStatus = tunnelAuthController.getBootstrapStatus();
         const providerMetadata = tunnelService.getProviderMetadata();
 
         return res.json({
@@ -398,14 +390,11 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           managedRemoteTunnelHostname: managedRemoteHostname || null,
           managedRemoteTunnelPresets: managedRemoteTunnelPresetSummaries,
           managedRemoteTunnelTokenPresetIds: managedRemoteTunnelConfig.tunnels.map((entry) => entry.id),
-          hasBootstrapToken: bootstrapStatus.hasBootstrapToken,
-          bootstrapExpiresAt: bootstrapStatus.bootstrapExpiresAt,
           policy: 'tunnel-gated',
           activeTunnelMode: activeNormalizedMode,
           activeSessions: tunnelAuthController.listTunnelSessions(),
           localPort: getActivePort(),
           ttlConfig: {
-            bootstrapTtlMs,
             sessionTtlMs,
           },
         });
@@ -481,15 +470,9 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           || ((runtimeHostname && hostname && runtimeHostname === hostname) ? runtimeToken : '')
           || configManagedRemoteToken
           || storedManagedRemoteToken;
-        const requestConnectTtlMs = typeof _req?.body?.connectTtlMs === 'number' && Number.isFinite(_req.body.connectTtlMs)
-          ? normalizeTunnelBootstrapTtlMs(_req.body.connectTtlMs)
-          : undefined;
         const requestSessionTtlMs = typeof _req?.body?.sessionTtlMs === 'number' && Number.isFinite(_req.body.sessionTtlMs)
           ? normalizeTunnelSessionTtlMs(_req.body.sessionTtlMs)
           : undefined;
-        const bootstrapTtlMs = requestConnectTtlMs ?? (settings?.tunnelBootstrapTtlMs === null
-          ? null
-          : normalizeTunnelBootstrapTtlMs(settings?.tunnelBootstrapTtlMs));
         const sessionTtlMs = requestSessionTtlMs ?? normalizeTunnelSessionTtlMs(settings?.tunnelSessionTtlMs);
 
         const previousTunnelId = tunnelAuthController.getActiveTunnelId();
@@ -513,11 +496,9 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           || previousProvider !== activeProvider
           || previousUrl !== publicUrl
         );
-        let revokedBootstrapCount = 0;
         let invalidatedSessionCount = 0;
         if (replacedTunnel && previousTunnelId) {
           const revoked = tunnelAuthController.revokeTunnelArtifacts(previousTunnelId);
-          revokedBootstrapCount = revoked.revokedBootstrapCount;
           invalidatedSessionCount = revoked.invalidatedSessionCount;
         }
 
@@ -527,8 +508,6 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           mode,
         });
 
-        const bootstrapToken = tunnelAuthController.issueBootstrapToken({ ttlMs: bootstrapTtlMs });
-        const connectUrl = `${publicUrl.replace(/\/$/, '')}/connect?t=${encodeURIComponent(bootstrapToken.token)}`;
         const managedRemoteTunnelConfig = await readManagedRemoteTunnelConfigFromDisk();
         const isCloudflareProvider = activeProvider === TUNNEL_PROVIDER_CLOUDFLARE;
 
@@ -540,8 +519,6 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           providerMetadata,
           managedRemoteTunnelHostname: isCloudflareProvider ? (hostname || null) : null,
           managedRemoteTunnelTokenPresetIds: isCloudflareProvider ? managedRemoteTunnelConfig.tunnels.map((entry) => entry.id) : [],
-          connectUrl,
-          bootstrapExpiresAt: bootstrapToken.expiresAt,
           replacedTunnel,
           replaced: replacedTunnel
             ? {
@@ -550,14 +527,12 @@ export const createTunnelRoutesRuntime = (dependencies) => {
               url: previousUrl,
             }
             : null,
-          revokedBootstrapCount,
           invalidatedSessionCount,
           policy: 'tunnel-gated',
           activeTunnelMode: mode,
           activeSessions: tunnelAuthController.listTunnelSessions(),
           localPort: getActivePort(),
           ttlConfig: {
-            bootstrapTtlMs,
             sessionTtlMs,
           },
         });
@@ -578,13 +553,11 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     });
 
     app.post('/api/openchamber/tunnel/stop', (_req, res) => {
-      let revokedBootstrapCount = 0;
       let invalidatedSessionCount = 0;
       const activeTunnelId = tunnelAuthController.getActiveTunnelId();
 
       if (activeTunnelId) {
         const revoked = tunnelAuthController.revokeTunnelArtifacts(activeTunnelId);
-        revokedBootstrapCount = revoked.revokedBootstrapCount;
         invalidatedSessionCount = revoked.invalidatedSessionCount;
       }
 
@@ -594,7 +567,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
       }
 
       tunnelAuthController.clearActiveTunnel();
-      res.json({ ok: true, revokedBootstrapCount, invalidatedSessionCount });
+      res.json({ ok: true, invalidatedSessionCount });
     });
   };
 

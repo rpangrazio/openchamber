@@ -2,7 +2,6 @@ export const createSettingsHelpers = (dependencies) => {
   const {
     normalizePathForPersistence,
     normalizeDirectoryPath,
-    normalizeTunnelBootstrapTtlMs,
     normalizeTunnelSessionTtlMs,
     normalizeTunnelProvider,
     normalizeTunnelMode,
@@ -198,11 +197,6 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.autoDeleteAfterDays === 'number' && Number.isFinite(candidate.autoDeleteAfterDays)) {
       const normalizedDays = Math.max(1, Math.min(365, Math.round(candidate.autoDeleteAfterDays)));
       result.autoDeleteAfterDays = normalizedDays;
-    }
-    if (candidate.tunnelBootstrapTtlMs === null) {
-      result.tunnelBootstrapTtlMs = null;
-    } else if (typeof candidate.tunnelBootstrapTtlMs === 'number' && Number.isFinite(candidate.tunnelBootstrapTtlMs)) {
-      result.tunnelBootstrapTtlMs = normalizeTunnelBootstrapTtlMs(candidate.tunnelBootstrapTtlMs);
     }
     if (typeof candidate.tunnelSessionTtlMs === 'number' && Number.isFinite(candidate.tunnelSessionTtlMs)) {
       result.tunnelSessionTtlMs = normalizeTunnelSessionTtlMs(candidate.tunnelSessionTtlMs);
