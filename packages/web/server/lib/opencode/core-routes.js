@@ -37,8 +37,6 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   const {
     tunnelAuthController,
     uiAuthController,
-    readSettingsFromDiskMigrated,
-    normalizeTunnelSessionTtlMs,
   } = dependencies;
 
   app.get('/auth/session', async (req, res) => {
@@ -65,35 +63,6 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
       return res.status(403).json({ error: 'Password login is disabled for tunnel scope', tunnelLocked: true });
     }
     return uiAuthController.handleSessionCreate(req, res);
-  });
-
-  app.get('/connect', async (req, res) => {
-    try {
-      const token = typeof req.query?.t === 'string' ? req.query.t : '';
-      const settings = await readSettingsFromDiskMigrated();
-      const tunnelSessionTtlMs = normalizeTunnelSessionTtlMs(settings?.tunnelSessionTtlMs);
-
-      const exchange = tunnelAuthController.exchangeBootstrapToken({
-        req,
-        res,
-        token,
-        sessionTtlMs: tunnelSessionTtlMs,
-      });
-
-      res.setHeader('Cache-Control', 'no-store');
-
-      if (!exchange.ok) {
-        if (exchange.reason === 'rate-limited') {
-          res.setHeader('Retry-After', String(exchange.retryAfter || 60));
-          return res.status(429).type('text/plain').send('Too many attempts. Please try again later.');
-        }
-        return res.status(401).type('text/plain').send('Connection link is invalid or expired.');
-      }
-
-      return res.redirect(302, '/');
-    } catch {
-      return res.status(500).type('text/plain').send('Failed to process connect request.');
-    }
   });
 
   app.use('/api', async (req, res, next) => {
