@@ -28,7 +28,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   npm \
   openssh-client \
   python3 \
+  curl gnupg\
   && rm -rf /var/lib/apt/lists/*
+RUN install -m 0755 -d /etc/apt/keyrings && \
+curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg &&\
+chmod a+r /etc/apt/keyrings/docker.gpg &&\
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  tee /etc/apt/sources.list.d/docker.list > /dev/null &&\
+apt update &&\
+apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
 
 # Replace the base image's 'bun' user (UID 1000) with 'openchamber'
 # so mounted volumes with 1000:1000 ownership work correctly.
@@ -72,6 +83,7 @@ RUN apt-get update && apt-get install -y curl build-essential gh && \
     echo "#!/bin/bash" > /start.sh && \
     echo '/home/openchamber/openchamber-entrypoint.sh&' >> /start.sh && \
     echo "cloudflared tunnel run --token eyJhIjoiMTkxYzkzYWU3OTZmZDkwNGU2ZGQ4Y2FjM2Q3MjI1OTgiLCJ0IjoiNmY1ZDQ2N2YtYzQ3NC00ZGE3LWFmNTktZTNmOGNkNjMyMGZhIiwicyI6IlpEazFNVGRtTnpNdE9HUmpaUzAwTTJRMExXSmlOV1l0WkRFNE4yUXdObUl5TnpZeiJ9" >> /start.sh &&\
+    usermod -a -G docker openchamber&&\
     chmod a+x /start.sh && \
     apt-get clean  && \
     rm -rf /var/lib/apt/lists/*
