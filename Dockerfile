@@ -44,7 +44,7 @@ apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker
 # Replace the base image's 'bun' user (UID 1000) with 'openchamber'
 # so mounted volumes with 1000:1000 ownership work correctly.
 RUN userdel bun \
-  && groupadd -g 988 docker \ 
+  && groupdel docker &&  groupadd -g 988 docker \ 
  && groupadd -g 1000 openchamber \
   && useradd -u 1000 -g 1000 -m -s /bin/bash openchamber \
   && chown -R openchamber:openchamber /home/openchamber
